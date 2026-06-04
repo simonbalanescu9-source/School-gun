@@ -1,0 +1,63 @@
+html, body {
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  font-family: Arial, sans-serif;
+  background: #000;
+}
+
+canvas {
+  display: block;
+}
+
+#game-ui {
+  position: absolute;
+  top: 15px;
+  left: 15px;
+  color: white;
+  z-index: 10;
+  background: rgba(0, 0, 0, 0.45);
+  padding: 14px 18px;
+  border-radius: 12px;
+  width: 310px;
+  backdrop-filter: blur(6px);
+}
+
+#game-ui h1 {
+  margin: 0 0 8px;
+  font-size: 24px;
+}
+
+#status {
+  font-size: 14px;
+  color: #d8f3ff;
+}
+
+.stats {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-top: 10px;
+}
+
+.controls {
+  margin-top: 12px;
+  font-size: 13px;
+  color: #eee;
+}
+
+.controls p {
+  margin: 3px 0;
+}
+
+#crosshair {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  color: white;
+  font-size: 24px;
+  transform: translate(-50%, -50%);
+  z-index: 11;
+  pointer-events: none;
+  text-shadow: 0 0 6px black;
+}
