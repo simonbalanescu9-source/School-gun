@@ -1,0 +1,668 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Classroom Splash</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;
+  overflow:hidden;
+  font-family:Arial,Helvetica,sans-serif;
+  background:#111;
+  user-select:none;
+}
+canvas{display:block}
+#overlay{
+  position:fixed;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  color:white;
+  pointer-events:none;
+}
+.panel{
+  pointer-events:auto;
+  width:min(720px,92vw);
+  padding:28px;
+  border-radius:24px;
+  background:rgba(10,20,35,.88);
+  box-shadow:0 25px 80px rgba(0,0,0,.55);
+  border:2px solid rgba(255,255,255,.12);
+  backdrop-filter:blur(10px);
+  text-align:center;
+}
+h1{
+  margin:0;
+  font-size:54px;
+  letter-spacing:1px;
+}
+button{
+  border:0;
+  padding:14px 24px;
+  margin:8px;
+  border-radius:16px;
+  font-size:18px;
+  font-weight:bold;
+  cursor:pointer;
+  background:#4cc9f0;
+  color:#06202e;
+  box-shadow:0 8px 0 #168aad;
+}
+button:active{transform:translateY(5px);box-shadow:0 3px 0 #168aad}
+.small{font-size:15px;opacity:.85;line-height:1.5}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+
+<div id="overlay">
+  <div class="panel" id="menu">
+    <h1>CLASSROOM SPLASH</h1>
+    <p class="small">
+      You are stuck sitting in class. You cannot move.<br>
+      Aim with the mouse or finger. Spray students for points.<br>
+      Do NOT annoy the teacher too much.
+    </p>
+    <button onclick="startGame()">Start Game</button>
+    <button onclick="resetSave()">Reset Save</button>
+    <p class="small" id="saveText"></p>
+  </div>
+
+  <div class="panel hidden" id="gameOver">
+    <h1 id="endTitle">Caught!</h1>
+    <p class="small" id="endStats"></p>
+    <button onclick="startGame()">Play Again</button>
+    <button onclick="showMenu()">Menu</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const menu = document.getElementById("menu");
+const gameOverPanel = document.getElementById("gameOver");
+const saveText = document.getElementById("saveText");
+const endTitle = document.getElementById("endTitle");
+const endStats = document.getElementById("endStats");
+
+let W, H, scale;
+let state = "menu";
+let mouse = {x:0,y:0,down:false};
+let particles = [];
+let droplets = [];
+let floatText = [];
+let students = [];
+let teacher;
+let powerups = [];
+
+let score = 0;
+let combo = 0;
+let comboTimer = 0;
+let suspicion = 0;
+let ammo = 100;
+let level = 1;
+let timeLeft = 60;
+let highScore = Number(localStorage.getItem("classSplashHigh") || 0);
+let upgrade = Number(localStorage.getItem("classSplashUpgrade") || 0);
+let lastTime = 0;
+
+function resize(){
+  W = canvas.width = innerWidth;
+  H = canvas.height = innerHeight;
+  scale = Math.min(W/1200, H/720);
+}
+addEventListener("resize", resize);
+resize();
+
+function showMenu(){
+  state="menu";
+  menu.classList.remove("hidden");
+  gameOverPanel.classList.add("hidden");
+  saveText.innerHTML = `High score: <b>${highScore}</b><br>Water gun upgrade: <b>${upgrade}</b>`;
+}
+showMenu();
+
+function resetSave(){
+  localStorage.removeItem("classSplashHigh");
+  localStorage.removeItem("classSplashUpgrade");
+  highScore=0;
+  upgrade=0;
+  showMenu();
+}
+
+function startGame(){
+  state="playing";
+  menu.classList.add("hidden");
+  gameOverPanel.classList.add("hidden");
+  score=0;
+  combo=0;
+  comboTimer=0;
+  suspicion=0;
+  ammo=100;
+  level=1;
+  timeLeft=60;
+  particles=[];
+  droplets=[];
+  floatText=[];
+  powerups=[];
+  spawnClassroom();
+}
+
+function spawnClassroom(){
+  students=[];
+  const rows=[
+    {y:H*.48,count:5},
+    {y:H*.62,count:6},
+    {y:H*.76,count:5}
+  ];
+
+  const colors=["#ff6b6b","#ffd166","#06d6a0","#4cc9f0","#b388ff","#ff9f1c"];
+
+  rows.forEach((row,ri)=>{
+    for(let i=0;i<row.count;i++){
+      let gap=W/(row.count+1);
+      students.push({
+        x:gap*(i+1)+rand(-20,20),
+        y:row.y+rand(-10,10),
+        baseX:gap*(i+1),
+        baseY:row.y,
+        r:32*scale,
+        color:colors[Math.floor(Math.random()*colors.length)],
+        wet:0,
+        mood:0,
+        duck:0,
+        blink:Math.random()*2,
+        name:["Alex","Mia","Leo","Nina","Sam","Tara","Max","Lia"][Math.floor(Math.random()*8)],
+        dir:Math.random()<.5?-1:1
+      });
+    }
+  });
+
+  teacher={
+    x:W/2,
+    y:H*.24,
+    look:0,
+    lookTimer:1.5,
+    angry:0,
+    wet:0,
+    r:42*scale
+  };
+}
+
+function rand(a,b){return Math.random()*(b-a)+a}
+function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+
+function pointerPos(e){
+  const t=e.touches?e.touches[0]:e;
+  mouse.x=t.clientX;
+  mouse.y=t.clientY;
+}
+addEventListener("mousemove",pointerPos);
+addEventListener("touchmove",e=>{pointerPos(e);e.preventDefault()},{passive:false});
+addEventListener("mousedown",e=>{pointerPos(e);mouse.down=true;shoot()});
+addEventListener("mouseup",()=>mouse.down=false);
+addEventListener("touchstart",e=>{pointerPos(e);mouse.down=true;shoot();e.preventDefault()},{passive:false});
+addEventListener("touchend",()=>mouse.down=false);
+
+function shoot(){
+  if(state!=="playing" || ammo<=0)return;
+
+  const gunX=W/2+70*scale;
+  const gunY=H-80*scale;
+  const dx=mouse.x-gunX;
+  const dy=mouse.y-gunY;
+  const angle=Math.atan2(dy,dx);
+
+  const cost=Math.max(2,5-upgrade);
+  ammo=clamp(ammo-cost,0,100);
+
+  for(let i=0;i<20+upgrade*8;i++){
+    droplets.push({
+      x:gunX,
+      y:gunY,
+      vx:Math.cos(angle+rand(-.12,.12))*rand(900,1250)*scale,
+      vy:Math.sin(angle+rand(-.12,.12))*rand(900,1250)*scale,
+      life:rand(.35,.65),
+      max:1,
+      size:rand(3,6)*scale
+    });
+  }
+
+  addSplash(mouse.x,mouse.y,18+upgrade*4);
+  checkHits(mouse.x,mouse.y);
+}
+
+function checkHits(x,y){
+  let hit=false;
+
+  students.forEach(s=>{
+    const d=Math.hypot(x-s.x,y-(s.y-s.duck));
+    if(d<55*scale){
+      hit=true;
+      s.wet=1;
+      s.mood=1;
+      s.duck=rand(8,22)*scale;
+      combo++;
+      comboTimer=2;
+      const gain=10*combo;
+      score+=gain;
+      addText("+"+gain,s.x,s.y-80*scale,"#e0fbfc");
+      for(let i=0;i<18;i++)burst(s.x,s.y-40*scale);
+    }
+  });
+
+  const td=Math.hypot(x-teacher.x,y-teacher.y);
+  if(td<75*scale){
+    teacher.wet=1;
+    teacher.angry=1;
+    suspicion+=30;
+    addText("Teacher!",teacher.x,teacher.y-90*scale,"#ff595e");
+    for(let i=0;i<26;i++)burst(teacher.x,teacher.y);
+  }
+
+  if(!hit && td>=75*scale){
+    combo=0;
+    suspicion+=2;
+  }
+}
+
+function addSplash(x,y,r){
+  particles.push({type:"ring",x,y,r,life:.35,max:.35});
+}
+
+function burst(x,y){
+  particles.push({
+    type:"drop",
+    x,y,
+    vx:rand(-180,180)*scale,
+    vy:rand(-220,60)*scale,
+    size:rand(3,8)*scale,
+    life:rand(.35,.7),
+    max:.7
+  });
+}
+
+function addText(text,x,y,color){
+  floatText.push({text,x,y,vy:-45*scale,life:1,color});
+}
+
+function update(dt){
+  if(state!=="playing")return;
+
+  timeLeft-=dt;
+  ammo=clamp(ammo+dt*(9+upgrade*2),0,100);
+  suspicion=clamp(suspicion-dt*5,0,100);
+
+  if(comboTimer>0)comboTimer-=dt;
+  else combo=0;
+
+  teacher.lookTimer-=dt;
+  if(teacher.lookTimer<=0){
+    teacher.lookTimer=rand(1.1,2.6);
+    teacher.look=rand(-1,1);
+    if(Math.random()<.35)suspicion+=5;
+  }
+  teacher.angry=Math.max(0,teacher.angry-dt*.8);
+  teacher.wet=Math.max(0,teacher.wet-dt*.5);
+
+  students.forEach((s,i)=>{
+    s.blink+=dt;
+    s.x=s.baseX+Math.sin(performance.now()/700+i)*16*scale;
+    s.y=s.baseY+Math.cos(performance.now()/900+i)*5*scale;
+    s.wet=Math.max(0,s.wet-dt*.25);
+    s.mood=Math.max(0,s.mood-dt*.8);
+    s.duck=Math.max(0,s.duck-dt*28*scale);
+  });
+
+  droplets.forEach(d=>{
+    d.x+=d.vx*dt;
+    d.y+=d.vy*dt;
+    d.vy+=600*scale*dt;
+    d.life-=dt;
+  });
+  droplets=droplets.filter(d=>d.life>0 && d.x>-50 && d.x<W+50 && d.y>-50 && d.y<H+50);
+
+  particles.forEach(p=>{
+    p.life-=dt;
+    if(p.type==="drop"){
+      p.x+=p.vx*dt;
+      p.y+=p.vy*dt;
+      p.vy+=500*scale*dt;
+    } else {
+      p.r+=120*scale*dt;
+    }
+  });
+  particles=particles.filter(p=>p.life>0);
+
+  floatText.forEach(f=>{
+    f.y+=f.vy*dt;
+    f.life-=dt;
+  });
+  floatText=floatText.filter(f=>f.life>0);
+
+  if(Math.random()<dt*.08){
+    powerups.push({
+      x:rand(100,W-100),
+      y:rand(H*.35,H*.65),
+      type:Math.random()<.5?"ammo":"calm",
+      life:7
+    });
+  }
+
+  powerups.forEach(p=>p.life-=dt);
+  powerups=powerups.filter(p=>p.life>0);
+
+  if(suspicion>=100)endGame(false);
+  if(timeLeft<=0)endGame(true);
+}
+
+function endGame(win){
+  state="end";
+  if(score>highScore){
+    highScore=score;
+    localStorage.setItem("classSplashHigh",highScore);
+  }
+
+  if(win && score>500 && upgrade<5){
+    upgrade++;
+    localStorage.setItem("classSplashUpgrade",upgrade);
+  }
+
+  endTitle.textContent=win?"Class survived!":"You got caught!";
+  endStats.innerHTML=
+    `Score: <b>${score}</b><br>`+
+    `High score: <b>${highScore}</b><br>`+
+    `Water gun upgrade: <b>${upgrade}</b>`;
+  gameOverPanel.classList.remove("hidden");
+}
+
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  drawRoom();
+  drawTeacher();
+  students.forEach(drawStudent);
+  drawPowerups();
+  drawDeskAndGun();
+  drawParticles();
+  drawUI();
+}
+
+function drawRoom(){
+  const g=ctx.createLinearGradient(0,0,0,H);
+  g.addColorStop(0,"#bde0fe");
+  g.addColorStop(.45,"#eaf6ff");
+  g.addColorStop(.45,"#f4d6a0");
+  g.addColorStop(1,"#b8794a");
+  ctx.fillStyle=g;
+  ctx.fillRect(0,0,W,H);
+
+  ctx.fillStyle="#7f5539";
+  ctx.fillRect(0,H*.84,W,H*.16);
+
+  ctx.fillStyle="#355e3b";
+  roundRect(W*.28,H*.06,W*.44,H*.2,18*scale);
+  ctx.fill();
+
+  ctx.strokeStyle="#ddbea9";
+  ctx.lineWidth=8*scale;
+  ctx.stroke();
+
+  ctx.fillStyle="rgba(255,255,255,.9)";
+  ctx.font=`${30*scale}px Arial`;
+  ctx.textAlign="center";
+  ctx.fillText("Math Test Today",W/2,H*.14);
+
+  ctx.font=`${18*scale}px Arial`;
+  ctx.fillText("Stay calm. Definitely do not spray water.",W/2,H*.18);
+
+  for(let i=0;i<9;i++){
+    ctx.fillStyle="rgba(255,255,255,.35)";
+    ctx.fillRect(40+i*150*scale,35*scale,90*scale,70*scale);
+  }
+
+  drawClock(W*.86,H*.12,38*scale);
+}
+
+function drawClock(x,y,r){
+  ctx.fillStyle="#fff";
+  ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
+  ctx.strokeStyle="#222";ctx.lineWidth=3*scale;ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x,y);ctx.lineTo(x,y-r*.55);
+  ctx.moveTo(x,y);ctx.lineTo(x+r*.45,y);
+  ctx.stroke();
+}
+
+function drawStudent(s){
+  drawDesk(s.x,s.y+35*scale,105*scale,48*scale);
+
+  const y=s.y-s.duck;
+  ctx.save();
+
+  ctx.fillStyle=s.color;
+  roundRect(s.x-30*scale,y-5*scale,60*scale,70*scale,18*scale);
+  ctx.fill();
+
+  ctx.fillStyle="#ffd6b0";
+  ctx.beginPath();
+  ctx.arc(s.x,y-35*scale,25*scale,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle="#3a2a20";
+  ctx.beginPath();
+  ctx.arc(s.x,y-48*scale,26*scale,Math.PI,Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle="#111";
+  ctx.beginPath();
+  ctx.arc(s.x-8*scale,y-38*scale,3*scale,0,Math.PI*2);
+  ctx.arc(s.x+8*scale,y-38*scale,3*scale,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.strokeStyle="#111";
+  ctx.lineWidth=2*scale;
+  ctx.beginPath();
+  if(s.mood>0){
+    ctx.arc(s.x,y-27*scale,10*scale,0,Math.PI);
+  }else{
+    ctx.arc(s.x,y-24*scale,9*scale,0,Math.PI);
+  }
+  ctx.stroke();
+
+  if(s.wet>0){
+    ctx.fillStyle=`rgba(90,200,255,${s.wet})`;
+    ctx.beginPath();ctx.arc(s.x+12*scale,y-44*scale,9*scale,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(s.x-16*scale,y-12*scale,7*scale,0,Math.PI*2);ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function drawTeacher(){
+  const t=teacher;
+  ctx.save();
+  ctx.translate(t.x,t.y);
+
+  ctx.fillStyle=teacher.angry>0?"#e63946":"#4361ee";
+  roundRect(-42*scale,0,84*scale,95*scale,18*scale);
+  ctx.fill();
+
+  ctx.fillStyle="#ffd6b0";
+  ctx.beginPath();ctx.arc(0,-35*scale,34*scale,0,Math.PI*2);ctx.fill();
+
+  ctx.fillStyle="#2b2d42";
+  ctx.fillRect(-36*scale,-72*scale,72*scale,16*scale);
+  ctx.fillRect(-20*scale,-105*scale,40*scale,40*scale);
+
+  ctx.fillStyle="#111";
+  ctx.beginPath();
+  ctx.arc(-11*scale+teacher.look*8*scale,-40*scale,4*scale,0,Math.PI*2);
+  ctx.arc(11*scale+teacher.look*8*scale,-40*scale,4*scale,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.strokeStyle=teacher.angry>0?"#ff0000":"#111";
+  ctx.lineWidth=3*scale;
+  ctx.beginPath();
+  ctx.arc(0,-22*scale,13*scale,Math.PI,Math.PI*2);
+  ctx.stroke();
+
+  if(t.wet>0){
+    ctx.fillStyle=`rgba(80,190,255,${t.wet})`;
+    ctx.beginPath();ctx.arc(13*scale,-47*scale,12*scale,0,Math.PI*2);ctx.fill();
+    ctx.beginPath();ctx.arc(-20*scale,16*scale,10*scale,0,Math.PI*2);ctx.fill();
+  }
+
+  ctx.restore();
+}
+
+function drawDesk(x,y,w,h){
+  ctx.fillStyle="#9c6644";
+  roundRect(x-w/2,y,w,h,10*scale);
+  ctx.fill();
+  ctx.fillStyle="#7f4f24";
+  ctx.fillRect(x-w/2+10*scale,y+h,8*scale,45*scale);
+  ctx.fillRect(x+w/2-18*scale,y+h,8*scale,45*scale);
+}
+
+function drawDeskAndGun(){
+  ctx.fillStyle="#6f4e37";
+  roundRect(W/2-220*scale,H-120*scale,440*scale,130*scale,24*scale);
+  ctx.fill();
+
+  ctx.fillStyle="#1d3557";
+  roundRect(W/2-80*scale,H-85*scale,170*scale,38*scale,15*scale);
+  ctx.fill();
+
+  ctx.fillStyle="#4cc9f0";
+  roundRect(W/2+30*scale,H-107*scale,105*scale,24*scale,10*scale);
+  ctx.fill();
+
+  ctx.fillStyle="#023e8a";
+  roundRect(W/2-20*scale,H-50*scale,42*scale,72*scale,12*scale);
+  ctx.fill();
+
+  ctx.fillStyle="#caf0f8";
+  ctx.beginPath();
+  ctx.arc(W/2-70*scale,H-66*scale,24*scale,0,Math.PI*2);
+  ctx.fill();
+
+  ctx.fillStyle="white";
+  ctx.font=`${18*scale}px Arial`;
+  ctx.textAlign="center";
+  ctx.fillText("YOU CANNOT MOVE",W/2,H-145*scale);
+}
+
+function drawPowerups(){
+  powerups.forEach(p=>{
+    ctx.save();
+    ctx.globalAlpha=clamp(p.life,0,1);
+    ctx.fillStyle=p.type==="ammo"?"#00b4d8":"#90be6d";
+    ctx.beginPath();
+    ctx.arc(p.x,p.y,24*scale,0,Math.PI*2);
+    ctx.fill();
+    ctx.fillStyle="white";
+    ctx.font=`${22*scale}px Arial`;
+    ctx.textAlign="center";
+    ctx.fillText(p.type==="ammo"?"💧":"🙂",p.x,p.y+8*scale);
+    ctx.restore();
+  });
+}
+
+function drawParticles(){
+  droplets.forEach(d=>{
+    ctx.fillStyle=`rgba(70,190,255,${d.life/.65})`;
+    ctx.beginPath();
+    ctx.arc(d.x,d.y,d.size,0,Math.PI*2);
+    ctx.fill();
+  });
+
+  particles.forEach(p=>{
+    const a=p.life/p.max;
+    if(p.type==="ring"){
+      ctx.strokeStyle=`rgba(90,200,255,${a})`;
+      ctx.lineWidth=4*scale;
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,p.r,0,Math.PI*2);
+      ctx.stroke();
+    }else{
+      ctx.fillStyle=`rgba(90,200,255,${a})`;
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,p.size,0,Math.PI*2);
+      ctx.fill();
+    }
+  });
+
+  floatText.forEach(f=>{
+    ctx.save();
+    ctx.globalAlpha=f.life;
+    ctx.fillStyle=f.color;
+    ctx.font=`bold ${26*scale}px Arial`;
+    ctx.textAlign="center";
+    ctx.fillText(f.text,f.x,f.y);
+    ctx.restore();
+  });
+}
+
+function drawUI(){
+  ctx.textAlign="left";
+  ctx.fillStyle="rgba(0,0,0,.45)";
+  roundRect(18*scale,18*scale,330*scale,140*scale,18*scale);
+  ctx.fill();
+
+  ctx.fillStyle="white";
+  ctx.font=`bold ${24*scale}px Arial`;
+  ctx.fillText("Score: "+score,38*scale,55*scale);
+  ctx.fillText("Combo: x"+combo,38*scale,90*scale);
+  ctx.fillText("Time: "+Math.ceil(timeLeft),38*scale,125*scale);
+
+  bar(390*scale,30*scale,250*scale,24*scale,ammo/100,"#4cc9f0","Ammo");
+  bar(390*scale,70*scale,250*scale,24*scale,suspicion/100,"#ff595e","Trouble");
+
+  ctx.fillStyle="rgba(255,255,255,.9)";
+  ctx.font=`${16*scale}px Arial`;
+  ctx.fillText("Upgrade: "+upgrade,390*scale,120*scale);
+}
+
+function bar(x,y,w,h,v,color,label){
+  ctx.fillStyle="rgba(0,0,0,.35)";
+  roundRect(x,y,w,h,10*scale);
+  ctx.fill();
+
+  ctx.fillStyle=color;
+  roundRect(x,y,w*clamp(v,0,1),h,10*scale);
+  ctx.fill();
+
+  ctx.fillStyle="white";
+  ctx.font=`bold ${14*scale}px Arial`;
+  ctx.textAlign="center";
+  ctx.fillText(label,x+w/2,y+h-7*scale);
+}
+
+function roundRect(x,y,w,h,r){
+  ctx.beginPath();
+  ctx.moveTo(x+r,y);
+  ctx.lineTo(x+w-r,y);
+  ctx.quadraticCurveTo(x+w,y,x+w,y+r);
+  ctx.lineTo(x+w,y+h-r);
+  ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h);
+  ctx.lineTo(x+r,y+h);
+  ctx.quadraticCurveTo(x,y+h,x,y+h-r);
+  ctx.lineTo(x,y+r);
+  ctx.quadraticCurveTo(x,y,x+r,y);
+}
+
+function loop(t){
+  const dt=Math.min((t-lastTime)/1000,.033);
+  lastTime=t;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>
